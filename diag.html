@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Storage diagnostic</title>
+<style>
+  :root{
+    --bg:#FFF3D9; --panel:#fff; --panel-2:#FFFBEF; --ink:#17131f; --dim:#524b5c;
+    --ok:#0a7d4f; --ok-bg:#dcf6e8; --bad:#b91d38; --bad-bg:#ffe7ea; --warn:#8a5a10; --warn-bg:#fff1cf;
+    --line:#17131f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.55 'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    padding:16px 14px calc(40px + env(safe-area-inset-bottom))}
+  .wrap{max-width:34rem;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--dim);font-size:13px;margin:0 0 16px}
+  .card{background:var(--panel);border:2px solid var(--line);box-shadow:4px 4px 0 var(--line);
+    padding:16px;margin-bottom:14px}
+  .verdict{font-weight:800;font-size:19px;padding:16px;border:2px solid var(--line);
+    box-shadow:4px 4px 0 var(--line);margin-bottom:14px;text-align:center;line-height:1.35}
+  .v-ok{background:var(--ok-bg);color:var(--ok)}
+  .v-bad{background:var(--bad-bg);color:var(--bad)}
+  .v-wait{background:var(--warn-bg);color:var(--warn)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  td{padding:7px 4px;border-bottom:1px dashed #d9cfb4;vertical-align:top}
+  td:first-child{color:var(--dim);width:47%}
+  td:last-child{font-weight:600;text-align:right;word-break:break-word}
+  .y{color:var(--ok)} .n{color:var(--bad)} .q{color:var(--warn)}
+  button{font:inherit;font-weight:700;cursor:pointer;width:100%;
+    background:#E94560;color:#fff;border:2px solid var(--line);box-shadow:3px 3px 0 var(--line);
+    padding:14px;margin-top:10px}
+  button.alt{background:var(--panel)}
+  button:active{transform:translate(3px,3px);box-shadow:none}
+  h2{font-size:14px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim)}
+  pre{background:var(--panel-2);border:1px solid #d9cfb4;padding:10px;font-size:11px;
+    white-space:pre-wrap;word-break:break-all;max-height:240px;overflow:auto;margin:10px 0 0}
+  .step{background:var(--panel-2);border-left:4px solid #E94560;padding:10px 12px;font-size:14px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Storage diagnostic</h1>
+  <p class="sub">Checks whether this page can remember anything between visits — the thing the QR hunt depends on.</p>
+
+  <div class="step"><b>How to use:</b> load this page, then tap <b>Reload &amp; re-test</b> below. If the reload says the value was lost, that is the bug.</div>
+
+  <div id="verdict" class="verdict v-wait">Running…</div>
+
+  <div class="card">
+    <h2>Persistence across page loads</h2>
+    <table id="persist"></table>
+    <button onclick="location.reload()">Reload &amp; re-test</button>
+    <button class="alt" onclick="wipe()">Clear and start over</button>
+  </div>
+
+  <div class="card">
+    <h2>Where this page is running</h2>
+    <table id="env"></table>
+  </div>
+
+  <div class="card">
+    <h2>Storage mechanisms</h2>
+    <table id="mech"></table>
+  </div>
+
+  <div class="card">
+    <h2>Server transport (for the arcade)</h2>
+    <p class="sub" style="margin:0 0 8px">Only meaningful when this page is on the static host. Tells us whether the arcade can reach Apps Script from another origin.</p>
+    <table id="net"></table>
+    <button class="alt" onclick="testNet()">Test fetch + JSONP</button>
+  </div>
+
+  <div class="card">
+    <h2>Report</h2>
+    <p class="sub" style="margin:0 0 8px">Send this back so the results can be read exactly.</p>
+    <button class="alt" onclick="copyReport()">Copy report</button>
+    <pre id="report"></pre>
+  </div>
+</div>
+
+<script>
+/* The Apps Script deployment, used only by the transport test. */
+var EXEC = 'https://script.google.com/macros/s/AKfycbysCzWl9_dnfKGRdstzRWPFUqnGRrMFG3Z2iWoOaPnhvwJCsQEd8rreVoaJMPVjO9ve/exec';
+var KEY = 'diag_persist_v1';
+var rows = { persist: [], env: [], mech: [], net: [] };
+
+function esc(s){ return String(s).replace(/[&<>]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]; }); }
+function add(tbl, label, value, cls){
+  rows[tbl].push([label, value]);
+  var t = document.getElementById(tbl);
+  t.insertAdjacentHTML('beforeend',
+    '<tr><td>' + esc(label) + '</td><td class="' + (cls||'') + '">' + esc(value) + '</td></tr>');
+}
+function yn(b){ return b ? 'yes' : 'no'; }
+
+/* ---------- 1. the decisive test: did a previous load's value survive? ---------- */
+var prev = null, readErr = null, writeErr = null, wroteOk = false;
+try { prev = localStorage.getItem(KEY); } catch (e) { readErr = e.name + ': ' + e.message; }
+
+var visit = 1, firstSeen = new Date().toISOString();
+if (prev) {
+  try {
+    var o = JSON.parse(prev);
+    visit = (o.visit || 1) + 1;
+    firstSeen = o.firstSeen || firstSeen;
+  } catch (e) { prev = null; }
+}
+try {
+  localStorage.setItem(KEY, JSON.stringify({ visit: visit, firstSeen: firstSeen, at: new Date().toISOString() }));
+  wroteOk = true;
+} catch (e) { writeErr = e.name + ': ' + e.message; }
+
+/* did the write actually land, right now, in this same page load? */
+var readBack = null;
+try { readBack = localStorage.getItem(KEY); } catch (e) {}
+var sameLoadOk = !!readBack;
+
+add('persist', 'Previous visit remembered', prev ? 'YES' : 'NO', prev ? 'y' : 'n');
+add('persist', 'Visit number', String(visit));
+if (prev) add('persist', 'First seen', firstSeen);
+add('persist', 'Write succeeded (no error)', yn(wroteOk), wroteOk ? 'y' : 'n');
+add('persist', 'Readable in this same load', yn(sameLoadOk), sameLoadOk ? 'y' : 'n');
+if (writeErr) add('persist', 'Write error', writeErr, 'n');
+if (readErr) add('persist', 'Read error', readErr, 'n');
+
+/* verdict */
+var v = document.getElementById('verdict');
+if (visit > 1) {
+  v.className = 'verdict v-ok';
+  v.textContent = 'STORAGE WORKS HERE — remembered ' + visit + ' visits. The hunt would work on this device at this address.';
+} else if (!wroteOk) {
+  v.className = 'verdict v-bad';
+  v.textContent = 'STORAGE IS BLOCKED — writing threw an error. The hunt cannot remember progress here.';
+} else if (!sameLoadOk) {
+  v.className = 'verdict v-bad';
+  v.textContent = 'STORAGE IS FAKE — the write reported success but the value is already gone.';
+} else {
+  v.className = 'verdict v-wait';
+  v.textContent = 'FIRST VISIT — value written. Now tap "Reload & re-test". If it still says first visit, storage is not persisting.';
+}
+
+/* ---------- 2. environment ---------- */
+var inFrame = false, topOrigin = '(blocked - cross-origin)';
+try { inFrame = window.top !== window.self; } catch (e) { inFrame = true; }
+try { topOrigin = window.top.location.origin; } catch (e) {}
+add('env', 'This page origin', location.origin);
+add('env', 'Inside an iframe', yn(inFrame), inFrame ? 'q' : 'y');
+add('env', 'Top-page origin', topOrigin);
+add('env', 'Third-party context', inFrame && topOrigin.indexOf(location.origin) < 0 ? 'YES - storage is partitioned' : 'no',
+    inFrame && topOrigin.indexOf(location.origin) < 0 ? 'n' : 'y');
+add('env', 'Secure (https)', yn(location.protocol === 'https:'));
+add('env', 'Browser', navigator.userAgent);
+add('env', 'Cookies enabled', yn(navigator.cookieEnabled), navigator.cookieEnabled ? 'y' : 'n');
+
+/* ---------- 3. other mechanisms ---------- */
+function tryStore(name, store){
+  try {
+    store.setItem('__t', '1');
+    var got = store.getItem('__t');
+    store.removeItem('__t');
+    add('mech', name, got === '1' ? 'works' : 'accepted but empty', got === '1' ? 'y' : 'n');
+  } catch (e) { add('mech', name, 'blocked (' + e.name + ')', 'n'); }
+}
+try { tryStore('localStorage', window.localStorage); } catch (e) { add('mech','localStorage','unavailable','n'); }
+try { tryStore('sessionStorage', window.sessionStorage); } catch (e) { add('mech','sessionStorage','unavailable','n'); }
+try {
+  document.cookie = '__t=1; SameSite=None; Secure; path=/';
+  add('mech', 'cookies', document.cookie.indexOf('__t=1') >= 0 ? 'works' : 'blocked',
+      document.cookie.indexOf('__t=1') >= 0 ? 'y' : 'n');
+} catch (e) { add('mech', 'cookies', 'blocked', 'n'); }
+add('mech', 'IndexedDB present', yn(!!window.indexedDB), window.indexedDB ? 'y' : 'n');
+if (document.hasStorageAccess) {
+  document.hasStorageAccess().then(function (has) {
+    add('mech', 'Has storage access (API)', yn(has), has ? 'y' : 'n');
+    buildReport();
+  }).catch(function () {});
+} else {
+  add('mech', 'Storage Access API', 'not supported');
+}
+
+/* ---------- 4. transport test ---------- */
+function testNet(){
+  document.getElementById('net').innerHTML = '';
+  rows.net = [];
+  add('net', 'From origin', location.origin);
+
+  var t0 = Date.now();
+  fetch(EXEC + '?api=ping', { method: 'GET' })
+    .then(function (r) { return r.text().then(function (b) { return { s: r.status, b: b }; }); })
+    .then(function (r) {
+      var okJson = r.b.indexOf('"ok"') >= 0;
+      add('net', 'fetch / CORS', okJson ? 'WORKS (' + (Date.now() - t0) + 'ms)' : 'HTTP ' + r.s + ' but unexpected body',
+          okJson ? 'y' : 'n');
+      buildReport();
+    })
+    .catch(function (e) {
+      add('net', 'fetch / CORS', 'BLOCKED: ' + e.message, 'n');
+      buildReport();
+    });
+
+  var cbName = 'diagcb' + Date.now();
+  var done = false;
+  window[cbName] = function (data) {
+    done = true;
+    add('net', 'JSONP', 'WORKS (' + (data && data.api) + ')', 'y');
+    buildReport();
+  };
+  var s = document.createElement('script');
+  s.src = EXEC + '?api=ping&callback=' + cbName;
+  s.onerror = function () { if (!done) { add('net', 'JSONP', 'FAILED to load', 'n'); buildReport(); } };
+  document.head.appendChild(s);
+  setTimeout(function () { if (!done) { add('net', 'JSONP', 'timed out (10s)', 'n'); buildReport(); } }, 10000);
+}
+
+function wipe(){
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  location.reload();
+}
+
+function buildReport(){
+  var out = ['=== storage diagnostic ==='];
+  ['persist','env','mech','net'].forEach(function (k) {
+    if (!rows[k].length) return;
+    out.push('[' + k + ']');
+    rows[k].forEach(function (r) { out.push('  ' + r[0] + ': ' + r[1]); });
+  });
+  document.getElementById('report').textContent = out.join('\n');
+}
+function copyReport(){
+  var t = document.getElementById('report').textContent;
+  if (navigator.clipboard) navigator.clipboard.writeText(t).then(function(){ alert('Report copied.'); },
+    function(){ alert('Select the text below and copy it manually.'); });
+  else alert('Select the text below and copy it manually.');
+}
+buildReport();
+</script>
+</body>
+</html>
