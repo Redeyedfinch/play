@@ -393,16 +393,24 @@ body.reduce-motion #confetti{display:none}
   eventLine: "Shut down the rogue AI",
   seed: "HASH-NEXUS-2026",
 
-  /* Live deployment (verified 24 Aug 2026: loads anonymously, no sign-in,
-     and the ?qr=&k= bridge reaches the game). The bare /macros/s/…/exec form
-     is used deliberately — the /a/paraminnovation.org/… variant works too but
-     is 22 characters longer, which makes every printed QR denser. */
-  /* First-party host (GitHub Pages). This MUST NOT be the Apps Script /exec
-     address: iOS Safari gives the Apps Script iframe an ephemeral third-party
-     store, so progress is wiped on every page load and a player can never get
-     past step 1. Confirmed on iOS 18.7 / Safari 26.6.1, 28 Aug 2026.
-     /exec still works for already-printed codes — it redirects here. */
-  eventUrl: "https://redeyedfinch.github.io/hash-play/",
+  /* Printed cards encode the Apps Script /exec address, NOT the games host.
+     That indirection is deliberate: doGet() redirects ?qr=&k= to the
+     first-party host, so if that host ever moves, one server-side constant
+     changes and every printed card keeps working. Cards pointed straight at
+     the host would be un-fixable once they are on paper — which is exactly
+     what saved us on 28 Aug 2026, when the host constant turned out to name
+     a repo (hash-play) that had never existed.
+
+     Why the game is served first-party at all: iOS Safari gives the Apps
+     Script iframe an ephemeral third-party store, so progress is wiped on
+     every page load and a player can never get past step 1. Confirmed on
+     iOS 18.7 / Safari 26.6.1, 28 Aug 2026.
+
+     The bare /macros/s/…/exec form is used deliberately — the
+     /a/<domain>/… variant works too but is 22 characters longer, which
+     makes every printed QR denser.
+     Redirect target: STATIC_HOME in Code.js. Verified live 28 Aug 2026. */
+  eventUrl: "https://script.google.com/macros/s/AKfycbysCzWl9_dnfKGRdstzRWPFUqnGRrMFG3Z2iWoOaPnhvwJCsQEd8rreVoaJMPVjO9ve/exec",
 
   /* Crew code for the organiser tools (the simulator can auto-complete
      a mission, so keep it from players). "" leaves the tools open. */
