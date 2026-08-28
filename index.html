@@ -397,7 +397,12 @@ body.reduce-motion #confetti{display:none}
      and the ?qr=&k= bridge reaches the game). The bare /macros/s/…/exec form
      is used deliberately — the /a/paraminnovation.org/… variant works too but
      is 22 characters longer, which makes every printed QR denser. */
-  eventUrl: "https://script.google.com/macros/s/AKfycbysCzWl9_dnfKGRdstzRWPFUqnGRrMFG3Z2iWoOaPnhvwJCsQEd8rreVoaJMPVjO9ve/exec",
+  /* First-party host (GitHub Pages). This MUST NOT be the Apps Script /exec
+     address: iOS Safari gives the Apps Script iframe an ephemeral third-party
+     store, so progress is wiped on every page load and a player can never get
+     past step 1. Confirmed on iOS 18.7 / Safari 26.6.1, 28 Aug 2026.
+     /exec still works for already-printed codes — it redirects here. */
+  eventUrl: "https://redeyedfinch.github.io/hash-play/",
 
   /* Crew code for the organiser tools (the simulator can auto-complete
      a mission, so keep it from players). "" leaves the tools open. */
