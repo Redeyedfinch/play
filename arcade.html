@@ -720,7 +720,7 @@ body.menu-open .mascot{z-index:40}   /* keep Shroomy under the open mobile menu 
   </style>
 </head>
 <body>
-<script>var ARCADE_API = "https://script.google.com/macros/s/AKfycbyTsa7GqC2cj8pkECxXAoRnHWBKAYNsyPiv8s_MikdE1HwKJqccw5EOWhdcv0Yy0Z-lUA/exec";</script>
+<script>var ARCADE_API = "https://script.google.com/macros/s/AKfycbyKlt7GF-pTdhu92BONMEQLV0uJiTcJmBEEk-H91pDBM4i1nCzzDhCo8PmA2CwN6Ef-/exec";</script>
 
 <!-- ============================== NAV ============================== -->
 <header class="nav">
@@ -1081,12 +1081,20 @@ var HashGames = (function(){
   var $$ = function(s,r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); };
 
   /* run a server function as a Promise */
+  var ARCADE_MAP = {
+    arcadeStatus:      { api:'hv.arcade.status',      payload:function(a){ return { id:a[0] }; } },
+    getLeaderboard:    { api:'hv.arcade.leaderboard', payload:function(a){ return { limit:a[0] }; } },
+    submitArcadeScore: { api:'hv.arcade.submitScore', payload:function(a){ var p=a[0]||{}; return { id:p.usn, name:p.name, game:p.game, score:p.score }; } }
+  };
   function gs(fn){
     var args = Array.prototype.slice.call(arguments,1);
-    var url = ARCADE_API + '?api=' + encodeURIComponent(fn)
-            + '&args=' + encodeURIComponent(JSON.stringify(args))
+    var m = ARCADE_MAP[fn];
+    var api = m ? m.api : ('hv.' + fn);
+    var payload = m ? m.payload(args) : args[0];
+    var url = ARCADE_API + '?api=' + encodeURIComponent(api)
+            + '&args=' + encodeURIComponent(JSON.stringify([payload]))
             + '&_=' + Date.now();                      /* never serve a cached reply */
-    return fetch(url, { method:'GET', credentials:'omit' })
+    return fetch(url, { method:'GET', credentials:'omit', redirect:'follow' })
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .catch(function(){ return gsJsonp(url); });      /* transport fallback */
   }
